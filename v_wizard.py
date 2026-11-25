@@ -49,7 +49,7 @@ def render(uid):
             svc.update_project(uid, pid, stage=stage, grade=grade, subject=subject, difficulty=diff, audience=aud, settings=s)
             st.session_state["wz_step"] = 2; st.rerun()
     elif step == 2:
-        st.caption("أضف مراجعك. المحتوى المستخرج فقط هو ما يُستخدم في الإنتاج. ما لا يمكن قراءته يُعرض لك بوضوح.")
+        st.caption("هذه الخطوة اختيارية. أضف مراجعك إن أردت، أو تابع بدونها. المحتوى المستخرج فقط هو ما يُستخدم من المصادر.")
         t1, t2, t3 = st.tabs(["نص / ملاحظات", "رفع ملفات", "رابط"])
         with t1:
             title = st.text_input("عنوان المصدر", key="wz_t_title")
@@ -76,8 +76,11 @@ def render(uid):
         for s in srcs:
             st.markdown(f"- **{esc(s['title'])}** `{s['kind']}` " + (badge("نص مقروء") if s["readable"] else badge("غير مقروء", "warn")) + f" {esc(s['read_note'])}", unsafe_allow_html=True)
         if not srcs:
-            st.info("لم تضف مصادر بعد. يمكنك المتابعة وسيُنتج المحتوى هيكلًا فارغًا بعلامات [اكتب هنا]، أو يعتمد على الذكاء الاصطناعي إن رُبط مزود.")
-        if nav():
+            st.info("لم تضف مصادر بعد، وهذا مسموح. بدون مصادر: إن كان الذكاء الاصطناعي متصلًا يُنتج المحتوى من موضوع المشروع وأهدافه (ويحتاج مراجعتك)، وإلا يُنتج هيكلًا بعلامات [اكتب هنا].")
+            if st.button("متابعة بدون مصادر ←", type="primary", key="wz_skip_src"):
+                st.session_state["wz_step"] = 3; st.rerun()
+            nav(False)
+        elif nav():
             st.session_state["wz_step"] = 3; st.rerun()
     elif step == 3:
         objs = p["objectives"]

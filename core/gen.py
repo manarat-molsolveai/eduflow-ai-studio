@@ -93,7 +93,7 @@ def _ctx(p, sources):
     return (f"اسم المشروع: {p['name']}\nالنوع: {PROJECT_TYPES.get(p['ptype'], p['ptype'])}\nالمرحلة: {p['stage']} {p['grade']}\n"
             f"المادة: {p['subject']}\nالصعوبة: {p['difficulty']}\nالجمهور: {p['audience']}\n"
             f"الأهداف: {json.dumps(p['objectives'], ensure_ascii=False)}\nاللغة: {p['settings'].get('language', 'العربية')}\n"
-            f"المصادر:\n{source_text(sources) or '(لا توجد مصادر نصية)'}")
+            f"المصادر:\n{source_text(sources) or '(لا توجد مصادر: اعتمد على موضوع المشروع وأهدافه ومعرفتك العامة المؤكدة فقط، وبسّط ولا تذكر أرقامًا أو اقتباسات أو روابط غير مؤكدة)'}")
 
 
 # ---------------- presentations ----------------
