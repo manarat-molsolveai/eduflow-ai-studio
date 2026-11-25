@@ -7,7 +7,8 @@ NAVY, TEAL, LIGHT, PURPLE, GOLD = "#14263D", "#16A6A1", "#F5F7FA", "#7568D8", "#
 CSS = f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap');
-html, body, .stApp, [class*="st-"], button, input, textarea, select {{ font-family: 'Tajawal','Noto Sans Arabic','Segoe UI',Tahoma,sans-serif !important; }}
+html, body, .stApp, p, label, h1, h2, h3, h4, li, button, input, textarea, select, div[data-baseweb] {{ font-family: 'Tajawal','Noto Sans Arabic','Segoe UI',Tahoma,sans-serif; }}
+[data-testid="stIconMaterial"], .material-icons, .material-symbols-rounded, span[class*="material"] {{ font-family: 'Material Symbols Rounded' !important; }}
 .stApp {{ direction: rtl; background: {LIGHT}; color: {NAVY}; }}
 .block-container {{ padding-top: 1.4rem; max-width: 1180px; }}
 input, textarea {{ direction: rtl; text-align: right; }}
