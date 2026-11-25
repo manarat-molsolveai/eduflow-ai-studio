@@ -103,3 +103,22 @@ def change_password(uid, old, new):
         u.pw_hash = _hash(new)
     db.log(uid, "password_changed")
     return True, ""
+
+
+def delete_account(uid, password):
+    """Permanently delete the user and every row they own. Requires the current password."""
+    from .db import (Project, Source, Output, OutputVersion, ExportFile, Task, Activity, Notification,
+                     QualityReview, AIJob, UserSetting, SessionTok)
+    from sqlalchemy import delete
+    with db.session() as s:
+        u = s.get(User, uid)
+        if not u or not _verify(password or "", u.pw_hash):
+            return False, "كلمة المرور غير صحيحة"
+        oids = [r for r in s.execute(select(Output.id).where(Output.user_id == uid)).scalars()]
+        if oids:
+            s.execute(delete(OutputVersion).where(OutputVersion.output_id.in_(oids)))
+            s.execute(delete(QualityReview).where(QualityReview.output_id.in_(oids)))
+        for M in (ExportFile, Task, Source, Output, Notification, Activity, AIJob, UserSetting, SessionTok, Project):
+            s.execute(delete(M).where(M.user_id == uid))
+        s.execute(delete(User).where(User.id == uid))
+    return True, ""

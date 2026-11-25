@@ -6,6 +6,7 @@ from .db import UserSetting, AIJob
 from sqlalchemy import select
 
 PROVIDERS = {
+    "github": {"label": "GitHub Models (مفتاح المنصة المشترك)", "models": ["openai/gpt-4o-mini", "openai/gpt-4o", "openai/gpt-4.1-mini"]},
     "openai": {"label": "OpenAI", "models": ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini"]},
     "gemini": {"label": "Google Gemini", "models": ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]},
     "anthropic": {"label": "Anthropic", "models": ["claude-3-5-haiku-latest", "claude-3-5-sonnet-latest"]},
@@ -20,6 +21,16 @@ def _secret():
     except Exception:
         pass
     return v
+
+
+def platform_key():
+    v = os.environ.get("GITHUB_MODELS_TOKEN", "")
+    try:
+        import streamlit as st
+        v = v or st.secrets.get("GITHUB_MODELS_TOKEN", "")
+    except Exception:
+        pass
+    return str(v or "").strip()
 
 
 def can_store_keys():
@@ -56,6 +67,8 @@ def save_key(uid, provider, key):
 
 def get_key(uid, provider):
     raw = get_setting(uid, f"key_{provider}")
+    if not raw and provider == "github":
+        return platform_key()
     if not raw or not can_store_keys():
         return ""
     try:
@@ -65,11 +78,17 @@ def get_key(uid, provider):
 
 
 def has_key(uid, provider):
-    return bool(get_setting(uid, f"key_{provider}"))
+    return bool(get_setting(uid, f"key_{provider}")) or (provider == "github" and bool(platform_key()))
 
 
 def active(uid):
     """Return (provider, model, key) if a tested, configured provider exists, else None."""
+    p = get_setting(uid, "provider")
+    if not p and platform_key() and get_setting(uid, "tested_github") != "fail":
+        m = PROVIDERS["github"]["models"][0]
+        ok, _ = test_connection(uid, "github", m, platform_key())
+        if ok:
+            set_setting(uid, "provider", "github"); set_setting(uid, "model", m)
     p = get_setting(uid, "provider")
     if not p or p not in PROVIDERS:
         return None
@@ -82,8 +101,9 @@ def active(uid):
 
 
 def _call(provider, model, key, system, prompt, max_tokens=4000, timeout=90):
-    if provider == "openai":
-        r = requests.post("https://api.openai.com/v1/chat/completions", timeout=timeout,
+    if provider in ("openai", "github"):
+        url = "https://models.github.ai/inference/chat/completions" if provider == "github" else "https://api.openai.com/v1/chat/completions"
+        r = requests.post(url, timeout=timeout,
                           headers={"Authorization": f"Bearer {key}"},
                           json={"model": model, "max_tokens": max_tokens, "messages": [
                               {"role": "system", "content": system}, {"role": "user", "content": prompt}]})

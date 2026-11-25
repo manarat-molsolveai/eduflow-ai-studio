@@ -48,7 +48,7 @@ def settings(uid):
         st.error("حفظ مفاتيح API غير متاح: لم يُضبط سر الخادم APP_SECRET. المفاتيح لا تُحفظ بدونه ولا تظهر للمتصفح أبدًا.")
     act = ai.active(uid)
     st.markdown("الحالة الحالية: " + (badge(f"متصل ومُختبر: {ai.PROVIDERS[act[0]]['label']}") if act else badge("غير متصل: التوليد بالقواعد المحلية فقط", "warn")), unsafe_allow_html=True)
-    prov = st.selectbox("المزود", list(ai.PROVIDERS), format_func=lambda k: ai.PROVIDERS[k]["label"], index=list(ai.PROVIDERS).index(ai.get_setting(uid, "provider") or "openai"))
+    prov = st.selectbox("المزود", list(ai.PROVIDERS), format_func=lambda k: ai.PROVIDERS[k]["label"], index=list(ai.PROVIDERS).index(ai.get_setting(uid, "provider") or ("github" if ai.platform_key() else "openai")))
     models = ai.PROVIDERS[prov]["models"]
     cur = ai.get_setting(uid, "model", models[0])
     model = st.selectbox("النموذج", models, index=models.index(cur) if cur in models else 0)
@@ -79,6 +79,22 @@ def settings(uid):
         if st.form_submit_button("تغيير"):
             ok, msg = __import__("core.auth", fromlist=["x"]).change_password(uid, o, n)
             (st.success("تم التغيير") if ok else st.error(msg))
+    delete_account_ui(uid)
+
+
+def delete_account_ui(uid):
+    st.divider()
+    st.markdown("### حذف الحساب")
+    with st.expander("حذف حسابي وكل بياناتي نهائيًا"):
+        st.warning("يحذف الحساب وجميع المشاريع والملفات والمخرجات. لا يمكن التراجع.")
+        pw = st.text_input("كلمة المرور للتأكيد", type="password", key="del_pw")
+        sure = st.checkbox("أفهم أن الحذف نهائي", key="del_ok")
+        if st.button("حذف الحساب نهائيًا", disabled=not sure):
+            ok, msg = __import__("core.auth", fromlist=["x"]).delete_account(uid, pw)
+            if ok:
+                st.session_state.clear(); st.query_params.clear(); st.rerun()
+            else:
+                st.error(msg)
 
 
 FEATURES = [
