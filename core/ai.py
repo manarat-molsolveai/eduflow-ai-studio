@@ -8,7 +8,7 @@ from sqlalchemy import select
 PROVIDERS = {
     "github": {"label": "GitHub Models (مفتاح المنصة المشترك)", "models": ["openai/gpt-4o-mini", "openai/gpt-4o", "openai/gpt-4.1-mini"]},
     "openai": {"label": "OpenAI", "models": ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini"]},
-    "gemini": {"label": "Google Gemini", "models": ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]},
+    "gemini": {"label": "Google Gemini", "models": ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash-lite", "gemini-2.5-pro"]},
     "anthropic": {"label": "Anthropic", "models": ["claude-3-5-haiku-latest", "claude-3-5-sonnet-latest"]},
 }
 
@@ -100,6 +100,43 @@ def active(uid):
     return p, get_setting(uid, "model", PROVIDERS[p]["models"][0]), k
 
 
+def _err_detail(r):
+    """Readable reason from a provider error response (never includes the key)."""
+    try:
+        j = r.json()
+        e = j.get("error", j) if isinstance(j, dict) else {}
+        msg = e.get("message") if isinstance(e, dict) else str(e)
+        st = e.get("status", "") if isinstance(e, dict) else ""
+        return f"HTTP {r.status_code} {st}: {str(msg)[:220]}"
+    except Exception:
+        return f"HTTP {r.status_code}: {r.text[:120]!r}"
+
+
+def gemini_models(key, timeout=30):
+    """Models this key can really call with generateContent (live ListModels)."""
+    r = requests.get("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", timeout=timeout,
+                     headers={"x-goog-api-key": key})
+    if r.status_code >= 400:
+        raise RuntimeError(_err_detail(r))
+    out = []
+    for m in r.json().get("models", []):
+        n = m.get("name", "").replace("models/", "")
+        if "generateContent" in m.get("supportedGenerationMethods", []) and n.startswith("gemini-"):
+            out.append(n)
+    return out
+
+
+def _pick_gemini(avail, want):
+    if want in avail:
+        return want
+    bad = ("tts", "image", "live", "audio", "embed", "transcribe", "translate", "preview", "exp", "robotics", "computer", "thinking")
+    ok = [n for n in avail if "flash" in n and not any(b in n for b in bad)]
+    for pref in PROVIDERS["gemini"]["models"]:
+        if pref in ok:
+            return pref
+    return sorted(ok, reverse=True)[0] if ok else (avail[0] if avail else want)
+
+
 def _call(provider, model, key, system, prompt, max_tokens=4000, timeout=90):
     if provider == "github":
         body = {"max_tokens": max_tokens, "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]}
@@ -151,17 +188,27 @@ def _call(provider, model, key, system, prompt, max_tokens=4000, timeout=90):
 def test_connection(uid, provider, model, key):
     """Real round trip. Returns (ok, message). Records result only when it really succeeded."""
     try:
+        key = (key or "").strip().strip('"\'')
+        if provider == "gemini":
+            avail = gemini_models(key)
+            if not avail:
+                set_setting(uid, f"tested_{provider}", "fail")
+                return False, "المفتاح صالح لكن لا توجد نماذج Gemini متاحة له"
+            picked = _pick_gemini(avail, model)
+            if picked != model:
+                set_setting(uid, "model", picked)
+                model = picked
         out, _, _ = _call(provider, model, key, "Reply with the single word OK.", "ping", max_tokens=16, timeout=30)
         ok = bool(out and out.strip())
         set_setting(uid, f"tested_{provider}", "ok" if ok else "fail")
         return ok, ("اتصال ناجح" if ok else "رد فارغ")
     except requests.HTTPError as e:
         set_setting(uid, f"tested_{provider}", "fail")
-        code = e.response.status_code if e.response is not None else "?"
-        return False, f"فشل الاتصال (HTTP {code}). تحقق من المفتاح والنموذج"
+        det = _err_detail(e.response) if e.response is not None else "?"
+        return False, f"فشل الاتصال ({det}). تحقق من المفتاح والنموذج"
     except Exception as e:
         set_setting(uid, f"tested_{provider}", "fail")
-        return False, f"فشل الاتصال: {type(e).__name__} {str(e)[:400] if provider == 'github' else ''}"
+        return False, f"فشل الاتصال: {type(e).__name__} {str(e)[:300]}"
 
 
 def extract_json(txt):
