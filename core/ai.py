@@ -173,15 +173,23 @@ def _call(provider, model, key, system, prompt, max_tokens=4000, timeout=90):
         j = r.json()
         return "".join(b.get("text", "") for b in j["content"]), j.get("usage", {}).get("input_tokens", 0), j.get("usage", {}).get("output_tokens", 0)
     if provider == "gemini":
-        r = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-                          timeout=timeout, headers={"x-goog-api-key": key},
-                          json={"systemInstruction": {"parts": [{"text": system}]},
-                                "contents": [{"parts": [{"text": prompt}]}],
-                                "generationConfig": {"maxOutputTokens": max_tokens}})
-        r.raise_for_status()
-        j = r.json()
-        u = j.get("usageMetadata", {})
-        return j["candidates"][0]["content"]["parts"][0]["text"], u.get("promptTokenCount", 0), u.get("candidatesTokenCount", 0)
+        order = [model] + [m for m in PROVIDERS["gemini"]["models"] if m != model]
+        last = None
+        for m in order:
+            r = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent",
+                              timeout=timeout, headers={"x-goog-api-key": key},
+                              json={"systemInstruction": {"parts": [{"text": system}]},
+                                    "contents": [{"parts": [{"text": prompt}]}],
+                                    "generationConfig": {"maxOutputTokens": max_tokens}})
+            if r.status_code in (429, 500, 503, 404):
+                last = r
+                continue
+            r.raise_for_status()
+            j = r.json()
+            u = j.get("usageMetadata", {})
+            _call.last_model = m
+            return j["candidates"][0]["content"]["parts"][0]["text"], u.get("promptTokenCount", 0), u.get("candidatesTokenCount", 0)
+        last.raise_for_status()
     raise ValueError("unknown provider")
 
 
@@ -198,7 +206,10 @@ def test_connection(uid, provider, model, key):
             if picked != model:
                 set_setting(uid, "model", picked)
                 model = picked
+            _call.last_model = model
         out, _, _ = _call(provider, model, key, "Reply with the single word OK.", "ping", max_tokens=16, timeout=30)
+        if provider == "gemini" and getattr(_call, "last_model", model) != model:
+            set_setting(uid, "model", _call.last_model)
         ok = bool(out and out.strip())
         set_setting(uid, f"tested_{provider}", "ok" if ok else "fail")
         return ok, ("اتصال ناجح" if ok else "رد فارغ")
