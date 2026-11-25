@@ -103,22 +103,22 @@ def active(uid):
 def _call(provider, model, key, system, prompt, max_tokens=4000, timeout=90):
     if provider == "github":
         body = {"max_tokens": max_tokens, "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]}
-        last = None
+        errs = []
         for url, mname in (("https://models.github.ai/inference/chat/completions", model),
                            ("https://models.inference.ai.azure.com/chat/completions", model.split("/")[-1])):
             try:
-                r = requests.post(url, timeout=timeout, headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},
+                r = requests.post(url, timeout=timeout, headers={"Authorization": f"Bearer {key}", "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json"},
                                   json={**body, "model": mname})
                 if r.status_code >= 400:
-                    last = f"HTTP {r.status_code} {r.text[:120]}"
+                    errs.append(f"HTTP {r.status_code} {r.text[:120]}")
                     continue
                 j = r.json()
                 return j["choices"][0]["message"]["content"], j.get("usage", {}).get("prompt_tokens", 0), j.get("usage", {}).get("completion_tokens", 0)
             except ValueError:
-                last = f"ردّ غير JSON من {url.split('/')[2]} (HTTP {r.status_code}): {r.text[:80]!r}"
+                errs.append(f"non-JSON {url.split('/')[2]} HTTP {r.status_code} {r.headers.get('content-type')} {r.text[:80]!r}")
             except requests.RequestException as e:
-                last = f"{type(e).__name__} {url.split('/')[2]}"
-        raise RuntimeError(last or "فشل")
+                errs.append(f"{type(e).__name__} {url.split('/')[2]}")
+        raise RuntimeError(" | ".join(errs) or "فشل")
     if provider == "openai":
         r = requests.post("https://api.openai.com/v1/chat/completions", timeout=timeout,
                           headers={"Authorization": f"Bearer {key}"},
@@ -161,7 +161,7 @@ def test_connection(uid, provider, model, key):
         return False, f"فشل الاتصال (HTTP {code}). تحقق من المفتاح والنموذج"
     except Exception as e:
         set_setting(uid, f"tested_{provider}", "fail")
-        return False, f"فشل الاتصال: {type(e).__name__} {str(e)[:200] if provider == 'github' else ''}"
+        return False, f"فشل الاتصال: {type(e).__name__} {str(e)[:400] if provider == 'github' else ''}"
 
 
 def extract_json(txt):
@@ -199,7 +199,7 @@ def generate_json(uid, project_id, module, system, prompt, validator, retries=2)
             _finish(jid, "done", attempt, "", tin, tout)
             return data, provider, model
         except Exception as e:
-            err = f"{type(e).__name__}: {str(e)[:200]}"
+            err = f"{type(e).__name__}: {str(e)[:400]}"
             time.sleep(1)
     _finish(jid, "failed", retries + 1, err, tin, tout)
     raise RuntimeError(err)
