@@ -259,8 +259,25 @@ def extract_json(txt):
     return json.loads(txt[a:b + 1])
 
 
-def generate_json(uid, project_id, module, system, prompt, validator, retries=2):
-    """Run provider with retry + validation; log job. Raises RuntimeError on final failure."""
+PROOF_SYS = ("أنت مدقق لغوي عربي محترف. مهمتك تنقيح JSON عربي تعليمي دون تغيير بنيته. "
+             "صحّح الأخطاء الإملائية والنحوية والكلمات الخاطئة (مثل «الحزين» مكان «الحي»)، وحسّن الصياغات الركيكة أو غير الطبيعية، "
+             "وأصلح أي حروف لاتينية أو كلمات أجنبية داخل النص العربي باستبدالها بالكلمة العربية الصحيحة من السياق. "
+             "لا تغيّر: بنية JSON ولا أسماء الحقول ولا عدد العناصر وترتيبها ولا المعنى، ولا تضف حقائق أو أرقامًا. أخرج JSON صالحًا فقط.")
+
+
+def _proofread(provider, model, key, data, validator):
+    """One linguistic cleanup pass over generated content. Returns cleaned data or None (keep original)."""
+    try:
+        out, a, b = _call(provider, model, key, PROOF_SYS, json.dumps(data, ensure_ascii=False), max_tokens=8000)
+        fixed = extract_json(out)
+        validator(fixed)
+        return fixed, a, b
+    except Exception:
+        return None
+
+
+def generate_json(uid, project_id, module, system, prompt, validator, retries=2, max_tokens=6000):
+    """Run provider with retry + validation + one proofreading pass; log job. Raises RuntimeError on final failure."""
     act = active(uid)
     if not act:
         raise RuntimeError("no_provider")
@@ -275,11 +292,16 @@ def generate_json(uid, project_id, module, system, prompt, validator, retries=2)
     for attempt in range(1, retries + 2):
         try:
             p = prompt if not err else prompt + f"\n\nالمحاولة السابقة فشلت بسبب: {err}\nأعد إخراج JSON صالحًا فقط."
-            out, a, b = _call(provider, model, key, system, p)
+            out, a, b = _call(provider, model, key, system, p, max_tokens=max_tokens)
             tin += a
             tout += b
             data = extract_json(out)
             validator(data)
+            proofed = _proofread(provider, model, key, data, validator)
+            if proofed:
+                data, a2, b2 = proofed
+                tin += a2
+                tout += b2
             _finish(jid, "done", attempt, "", tin, tout)
             return data, provider, model
         except Exception as e:

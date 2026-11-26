@@ -347,7 +347,7 @@ def do_export(uid, oid, fmt):
                     images[sid] = s_["blob"]
     try:
         p = get_project(uid, o["project_id"])
-        data, msg = ex.export(o["kind"], o["content"], fmt, images, {"brand": p["settings"].get("brand", "")})
+        data, msg = ex.export(o["kind"], o["content"], fmt, images, {"brand": p["settings"].get("brand", ""), "subject": p.get("subject", ""), "ptype": p.get("ptype", "")})
     except Exception as e:
         db.log(uid, "export_failed", f"{fmt}: {type(e).__name__}", o["project_id"])
         return None, f"فشل التصدير: {type(e).__name__}: {str(e)[:150]}"

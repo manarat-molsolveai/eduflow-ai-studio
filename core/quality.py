@@ -74,6 +74,13 @@ def review(kind, c, project, n_sources, generator):
         lg = 100 if ratio >= 0.7 else int(ratio / 0.7 * 100)
         if ratio < 0.7:
             warn.append(f"نسبة العربية {int(ratio*100)}% بينما لغة المشروع العربية")
+        # كلمات مختلطة: حروف لاتينية ملتصقة بأحرف عربية داخل الكلمة نفسها (مثل ما يحدث أحيانًا في مخرجات النماذج)
+        mixed = [w for w in re.findall(r"[A-Za-z\u0600-\u06FF]+", joined)
+                 if re.search(r"[A-Za-z]", w) and re.search(r"[\u0600-\u06FF]", w)]
+        if mixed:
+            lg = max(0, lg - min(30, 10 * len(mixed)))
+            err.append(f"كلمات فيها حروف لاتينية داخل النص العربي: {len(mixed)}")
+            tips.append("أعد التوليد أو عدّل الكلمات المختلطة يدويًا من المحرر")
     else:
         lg = 100 if ratio <= 0.3 else int((1 - ratio) / 0.7 * 100)
         if ratio > 0.3:

@@ -33,6 +33,65 @@ FONTS = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fonts")
 rgb = lambda h: RGBColor.from_string(h)
 
 
+# ---------------- themes ----------------
+# Distinctive palettes per subject; applied to PPTX and PDF slides. No AI images: free-tier keys cannot generate them,
+# so visual distinction comes from deliberate design (color, geometry, layout variety) rather than decoration promises.
+THEMES = {
+    "science":   {"band": "0B6B57", "accent": "2FA37C", "bg": "F1F8F5", "deco": "CDEAE0", "ink": "10312A", "chip": "E3F3EC"},
+    "math":      {"band": "3B3B8F", "accent": "6C63D8", "bg": "F4F4FB", "deco": "DFDEF6", "ink": "23234F", "chip": "EAE9FA"},
+    "arabic":    {"band": "8C2F39", "accent": "D97B3F", "bg": "FBF5F1", "deco": "F5DED2", "ink": "3F1D1D", "chip": "F9E9E2"},
+    "social":    {"band": "6B4E2E", "accent": "C08A3E", "bg": "FAF6EF", "deco": "EFE2CC", "ink": "3B2C17", "chip": "F6EBDA"},
+    "tech":      {"band": "16425B", "accent": "2E86AB", "bg": "F1F7FA", "deco": "D5E7F0", "ink": "122A3B", "chip": "E2EFF6"},
+    "art":       {"band": "7A1E5A", "accent": "C04FA0", "bg": "FBF2F7", "deco": "F2D7E7", "ink": "40152F", "chip": "F8E2EE"},
+    "default":   {"band": "123C5B", "accent": "1F8A8C", "bg": "F2F7F8", "deco": "D6E8EC", "ink": "142B3B", "chip": "E1EEF1"},
+}
+_THEME_KEYS = [
+    ("science", ("علوم", "science", "أحياء", "فيزياء", "كيمياء", "بيئة", "فلك")),
+    ("math", ("رياضيات", "math", "حساب", "هندسة")),
+    ("arabic", ("عربية", "لغتي", "قرآن", "تربية إسلامية", "إسلامية", "نحو", "قراءة", "لغة")),
+    ("social", ("اجتماعية", "تاريخ", "جغرافيا", "وطنية", "اجتماعيات", "دراسات")),
+    ("tech", ("حاسب", "تقنية", "رقمية", "برمجة", "حاسوب", "معلوماتية")),
+    ("art", ("فنية", "فنون", "رسم", "فن ")),
+]
+
+
+def _tokens(text):
+    toks = set()
+    for w in text.replace("،", " ").split():
+        toks.add(w)
+        if w.startswith("ال") and len(w) > 3:
+            toks.add(w[2:])
+    return toks
+
+
+def theme_for(*texts):
+    # texts are checked in priority order (subject before title): the first text
+    # containing any theme keyword decides the theme. Single-word keys match whole
+    # tokens (so علوم لا يطابق المعلومات); multi-word keys match as substrings.
+    for t in texts:
+        if not t:
+            continue
+        toks = _tokens(t)
+        for name, keys in _THEME_KEYS:
+            for k in keys:
+                if (" " in k and k in t) or (" " not in k and k in toks):
+                    return THEMES[name]
+    return THEMES["default"]
+
+
+def _deco_circles(slide, th, W, H, variant=0):
+    """Soft overlapping circles bleeding off the corners; different arrangement per variant for visual variety."""
+    import itertools
+    sets = [
+        [(Inches(-1.4), Inches(-1.4), Inches(3.6)), (W - Inches(1.9), H - Inches(1.9), Inches(3.2)), (W - Inches(0.9), Inches(-0.9), Inches(1.8))],
+        [(W - Inches(1.6), Inches(-1.6), Inches(3.8)), (Inches(-1.2), H - Inches(1.6), Inches(2.8))],
+        [(Inches(-1.0), Inches(-1.0), Inches(2.6)), (Inches(-1.6), H - Inches(1.4), Inches(3.4)), (W - Inches(1.2), H - Inches(1.2), Inches(2.2))],
+    ]
+    for x, y, d in sets[variant % len(sets)]:
+        o = slide.shapes.add_shape(MSO_SHAPE.OVAL, x, y, d, d)
+        o.fill.solid(); o.fill.fore_color.rgb = rgb(th["deco"]); o.line.fill.background(); o.shadow.inherit = False
+
+
 # ---------------- PPTX ----------------
 def _rtl_para(p, size, bold=False, color=NAVY, align="r"):
     pPr = p._p.get_or_add_pPr()
@@ -73,6 +132,8 @@ def _text(slide, x, y, w, h, lines, size, bold=False, color=NAVY, bullet=False, 
 
 def build_pptx(content, images=None, meta=None, rtl=True):
     images = images or {}
+    meta = meta or {}
+    th = theme_for(meta.get("subject", ""), content.get("title", ""))
     prs = Presentation()
     prs.slide_width, prs.slide_height = Inches(13.333), Inches(7.5)
     W, H = prs.slide_width, prs.slide_height
@@ -82,26 +143,31 @@ def build_pptx(content, images=None, meta=None, rtl=True):
         sl = prs.slides.add_slide(blank)
         lay = s.get("layout", "bullets")
         if lay in ("title", "closing"):
-            bg = _box(sl, 0, 0, W, H, NAVY)
-            _box(sl, Inches(9.2), Inches(3.3), Inches(3.4), Emu(45720), GOLD)
+            _box(sl, 0, 0, W, H, th["band"])
+            _deco_circles(sl, {"deco": th["accent"]}, W, H, variant=idx)
+            _box(sl, Inches(9.2), Inches(3.3), Inches(3.4), Emu(45720), th["accent"] if lay == "title" else "FFFFFF")
             _text(sl, Inches(1), Inches(1.4), Inches(11.3), Inches(1.8), [s["title"]], 44, True, "FFFFFF", anchor=MSO_ANCHOR.BOTTOM)
             if s.get("bullets"):
-                _text(sl, Inches(1), Inches(3.6), Inches(11.3), Inches(2.4), s["bullets"], 22, False, "D9E2EC")
+                _text(sl, Inches(1), Inches(3.6), Inches(11.3), Inches(2.4), s["bullets"], 22, False, "EAF3F0")
         else:
-            _box(sl, 0, 0, W, H, LIGHT)
-            _box(sl, 0, 0, W, Inches(1.25), NAVY)
-            _box(sl, W - Inches(0.35), 0, Inches(0.35), H, TEAL)
+            _box(sl, 0, 0, W, H, th["bg"])
+            _deco_circles(sl, th, W, H, variant=idx)
+            _box(sl, 0, 0, W, Inches(1.25), th["band"])
+            _box(sl, W - Inches(0.35), 0, Inches(0.35), H, th["accent"])
+            # small accent marker at the right of the title (RTL reading start)
+            _box(sl, W - Inches(1.1), Inches(0.47), Inches(0.28), Inches(0.28), th["accent"])
             _text(sl, Inches(0.6), Inches(0.15), Inches(11.9), Inches(1.0), [s["title"]], 32, True, "FFFFFF", anchor=MSO_ANCHOR.MIDDLE)
             img = images.get(s.get("image_source_id"))
             bx_w = Inches(7.4) if img else Inches(11.9)
             bx_x = Inches(5.4) if img else Inches(0.6)
             if lay == "two_column" and len(s["bullets"]) > 1 and not img:
                 half = (len(s["bullets"]) + 1) // 2
-                _text(sl, Inches(6.9), Inches(1.6), Inches(5.6), Inches(5.2), s["bullets"][:half], 24, bullet=True)
-                _text(sl, Inches(0.6), Inches(1.6), Inches(5.6), Inches(5.2), s["bullets"][half:], 24, bullet=True)
+                _box(sl, Inches(6.62), Inches(1.7), Emu(22860), Inches(5.0), th["deco"])
+                _text(sl, Inches(6.9), Inches(1.6), Inches(5.6), Inches(5.2), s["bullets"][:half], 24, False, th["ink"], bullet=True)
+                _text(sl, Inches(0.6), Inches(1.6), Inches(5.6), Inches(5.2), s["bullets"][half:], 24, False, th["ink"], bullet=True)
             else:
                 n = len(s["bullets"])
-                _text(sl, bx_x, Inches(1.6), bx_w, Inches(5.2), s["bullets"], 28 if n <= 4 else 24 if n <= 6 else 20, bullet=True)
+                _text(sl, bx_x, Inches(1.6), bx_w, Inches(5.2), s["bullets"], 28 if n <= 4 else 24 if n <= 6 else 20, False, th["ink"], bullet=True)
             if img:
                 try:
                     from PIL import Image
@@ -114,13 +180,17 @@ def build_pptx(content, images=None, meta=None, rtl=True):
                     pass
         if s.get("notes"):
             sl.notes_slide.notes_text_frame.text = s["notes"]
-        # slide number
-        _text(sl, Inches(0.2), H - Inches(0.5), Inches(1.0), Inches(0.4), [str(idx + 1)], 12, False, "8A97A6", align="l")
-        if (meta or {}).get("brand") and lay not in ("title", "closing"):
+        # slide number chip
+        if lay not in ("title", "closing"):
+            _box(sl, Inches(0.18), H - Inches(0.52), Inches(0.42), Inches(0.34), th["chip"])
+            _text(sl, Inches(0.18), H - Inches(0.54), Inches(0.42), Inches(0.34), [str(idx + 1)], 12, True, th["band"], align="ctr")
+        else:
+            _text(sl, Inches(0.2), H - Inches(0.5), Inches(1.0), Inches(0.4), [str(idx + 1)], 12, False, "FFFFFF", align="l")
+        if meta.get("brand") and lay not in ("title", "closing"):
             _text(sl, Inches(3), H - Inches(0.5), Inches(7), Inches(0.4), [meta["brand"]], 12, False, "8A97A6", align="r")
     cp = prs.core_properties
     cp.title = content.get("title", "")
-    cp.author = (meta or {}).get("author", "EduFlow AI Studio")
+    cp.author = meta.get("author", "EduFlow AI Studio")
     b = io.BytesIO()
     prs.save(b)
     return b.getvalue()
@@ -207,25 +277,32 @@ class _Pdf:
         return self.buf.getvalue()
 
 
-def pdf_slides(content):
+def pdf_slides(content, meta=None):
     from reportlab.lib.colors import HexColor
+    meta = meta or {}
+    th = theme_for(meta.get("subject", ""), content.get("title", ""))
     p = _Pdf(landscape_=True)
     for i, s in enumerate(content["slides"]):
-        p.c.setFillColor(HexColor("#" + (NAVY if s.get("layout") in ("title", "closing") else LIGHT)))
+        cover = s.get("layout") in ("title", "closing")
+        p.c.setFillColor(HexColor("#" + (th["band"] if cover else th["bg"])))
         p.c.rect(0, 0, p.W, p.H, fill=1, stroke=0)
-        if s.get("layout") not in ("title", "closing"):
-            p.c.setFillColor(HexColor("#" + NAVY))
+        # decorative circles
+        p.c.setFillColor(HexColor("#" + (th["accent"] if cover else th["deco"])))
+        for (cx, cy, r) in ((60, p.H - 60, 90), (p.W - 50, 60, 75)):
+            p.c.circle(cx, cy, r, fill=1, stroke=0)
+        if not cover:
+            p.c.setFillColor(HexColor("#" + th["band"]))
             p.c.rect(0, p.H - 80, p.W, 80, fill=1, stroke=0)
-            p.c.setFillColor(HexColor("#" + TEAL))
+            p.c.setFillColor(HexColor("#" + th["accent"]))
             p.c.rect(p.W - 14, 0, 14, p.H, fill=1, stroke=0)
-        p.y = p.H - 55 if s.get("layout") not in ("title", "closing") else p.H / 2 + 30
-        p.line(s["title"], 28, True, "FFFFFF" if True else NAVY, gap=24)
-        p.y = p.H - 130 if s.get("layout") not in ("title", "closing") else p.y
-        col = NAVY if s.get("layout") not in ("title", "closing") else "D9E2EC"
+        p.y = p.H - 55 if not cover else p.H / 2 + 30
+        p.line(s["title"], 28, True, "FFFFFF", gap=24)
+        p.y = p.H - 130 if not cover else p.y
+        col = th["ink"] if not cover else "EAF3F0"
         for b in s["bullets"]:
             p.line("• " + b, 18, False, col, gap=8)
         p.c.setFont("Helvetica", 9)
-        p.c.setFillColorRGB(.55, .6, .65)
+        p.c.setFillColor(HexColor("#" + ("FFFFFF" if cover else th["band"])))
         p.c.drawString(20, 14, str(i + 1))
         p.page()
     return p.done()
@@ -523,7 +600,7 @@ def export(kind, content, fmt, images=None, meta=None):
     if fmt == "pptx" and kind == "presentation":
         d = build_pptx(content, images, meta); return d, verify_pptx(d)
     if fmt == "pdf":
-        d = pdf_slides(content) if kind == "presentation" else pdf_doc(content, kind); return d, verify_pdf(d)
+        d = pdf_slides(content, meta) if kind == "presentation" else pdf_doc(content, kind); return d, verify_pdf(d)
     if fmt == "docx" and kind in ("document", "worksheet", "assessment"):
         d = docx_doc(content, kind); return d, verify_docx(d)
     if fmt == "xlsx":

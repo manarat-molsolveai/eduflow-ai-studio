@@ -82,6 +82,39 @@ def T22():
     d = gen.diff_summary("assessment", old, new)
     assert any("العنوان" in x for x in d) and any("أُضيف 1 سؤال" in x for x in d), d
     return " | ".join(d)
+def T23():
+    """Proofreading pass: flawed AI JSON is cleaned by the second call; original kept when the proof pass fails."""
+    import unittest.mock as um
+    flawed = {"title": "عرض", "slides": [{"layout": "bullets", "title": "حماية البيئة",
+              "bullets": ["نrecycled أو نعيد تدوير النفايات", "يجب أن نافظ على النظافة"], "notes": ""}]}
+    cleaned = {"title": "عرض", "slides": [{"layout": "bullets", "title": "حماية البيئة",
+               "bullets": ["نعيد تدوير النفايات", "يجب أن نحافظ على النظافة"], "notes": ""}]}
+    calls = []
+    def fake_call(provider, model, key, system, prompt, max_tokens=4000, timeout=90):
+        calls.append(system)
+        data = flawed if len(calls) == 1 else cleaned
+        return json.dumps(data, ensure_ascii=False), 10, 20
+    with um.patch.object(ai, "_call", fake_call), um.patch.object(ai, "active", lambda uid: ("gemini", "m", "k")), um.patch.object(ai, "_finish", lambda *a, **k: None), um.patch.object(ai.db, "session") as ses:
+        ses.return_value.__enter__.return_value.add = lambda *a: None
+        ses.return_value.__enter__.return_value.flush = lambda: None
+        import contextlib
+        ses.return_value = contextlib.nullcontext(type("S", (), {"add": lambda s, x: None, "flush": lambda s: None})())
+        data, prov, model = ai.generate_json(A, ctx["pid"], "presentation", gen.SYS, "p", gen.validate_slides)
+    assert data == cleaned and len(calls) == 2 and ai.PROOF_SYS in calls[1], (data, len(calls))
+    # fallback: proof pass fails -> original kept
+    def gen_ok_proof_bad(provider, model, key, system, prompt, max_tokens=4000, timeout=90):
+        calls.append(system)
+        return json.dumps(flawed, ensure_ascii=False) if system != ai.PROOF_SYS else "not json at all", 5, 5
+    calls.clear()
+    with um.patch.object(ai, "_call", gen_ok_proof_bad), um.patch.object(ai, "active", lambda uid: ("gemini", "m", "k")), um.patch.object(ai, "_finish", lambda *a, **k: None), um.patch.object(ai.db, "session") as ses:
+        import contextlib
+        ses.return_value = contextlib.nullcontext(type("S", (), {"add": lambda s, x: None, "flush": lambda s: None})())
+        data2, _, _ = ai.generate_json(A, ctx["pid"], "presentation", gen.SYS, "p", gen.validate_slides)
+    assert data2 == flawed, data2
+    # rules-based detector in quality review
+    q = __import__("core.quality", fromlist=["x"]).review("presentation", flawed, svc.get_project(A, ctx["pid"]), 1, "ai:x:y")
+    assert any("حروف لاتينية" in e for e in q["errors"]), q
+    return "تنقيح آلي يعمل + احتفاظ بالأصل عند فشل التنقيح + كشف الكلمات المختلطة في المراجعة"
 def T13(): assert len(svc.list_projects(A, q="معدل")) == 1 and not svc.list_projects(A, q="لا يوجد شيء كهذا")
 def T15():
     assert svc.get_project(B, ctx["pid"]) is None and not svc.delete_project(B, ctx["pid"]) and svc.get_output(B, ctx["o"]) is None
@@ -108,7 +141,7 @@ def T16(): return "MANUAL: اختبار يدوي بلقطة هاتف على ال
 
 for n, f in [("T01 إنشاء مشروع", T01), ("T02 تعديل", T02), ("T03 حفظ", T03), ("T04 إعادة فتح", T04), ("T05 رفع ملف", T05), ("T06 إنشاء عرض", T06),
              ("T07 تعديل شريحة", T07), ("T08 حفظ التعديل", T08), ("T12 مراجعة الجودة", T12), ("T09 تصدير", T09), ("T10 فحص الملف", T10),
-             ("T11 ورقة عمل", T11), ("T21 استوديو الاختبارات", T21), ("T22 ملخص الفروق", T22), ("T13 بحث", T13), ("T15 الصلاحيات", T15), ("T14 حذف بتأكيد", T14), ("T17 Error State", T17),
+             ("T11 ورقة عمل", T11), ("T21 استوديو الاختبارات", T21), ("T22 ملخص الفروق", T22), ("T23 تنقيح لغوي آلي", T23), ("T13 بحث", T13), ("T15 الصلاحيات", T15), ("T14 حذف بتأكيد", T14), ("T17 Error State", T17),
              ("T19 فشل API", T19), ("T20 استمرارية", T20), ("T18 تكامل AI", T18), ("T16 الهاتف", T16)]:
     t(n, f)
 for r in R: print(*r, sep=" | ")
