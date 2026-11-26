@@ -475,3 +475,23 @@ def ai_jobs(uid, limit=20):
         return [{"module": j.module, "provider": j.provider, "model": j.model, "status": j.status, "attempts": j.attempts,
                  "error": j.error, "tin": j.tokens_in, "tout": j.tokens_out, "at": j.created_at}
                 for j in s.execute(select(AIJob).where(AIJob.user_id == uid).order_by(AIJob.id.desc()).limit(limit)).scalars()]
+
+
+def analytics(uid):
+    """Real aggregates over the user's own data. Nothing is estimated."""
+    from collections import Counter
+    with db.session() as s:
+        outs = s.execute(select(Output).where(Output.user_id == uid)).scalars().all()
+        gens = Counter(o.generator or "?" for o in outs)
+        kinds = Counter(o.kind for o in outs)
+        status = Counter(o.status for o in outs)
+        versions = dict(s.execute(select(OutputVersion.output_id, func.count()).where(OutputVersion.user_id == uid).group_by(OutputVersion.output_id)).all())
+        fmts = Counter(f for (f,) in s.execute(select(ExportFile.fmt).where(ExportFile.user_id == uid)).all())
+        jobs = s.execute(select(AIJob.status, func.count()).where(AIJob.user_id == uid, AIJob.provider != "local").group_by(AIJob.status)).all()
+        days = Counter(a.created_at.strftime("%Y-%m-%d") for a in s.execute(select(Activity).where(Activity.user_id == uid)).scalars() if a.created_at)
+        srcs = s.execute(select(Source.readable, func.count()).where(Source.user_id == uid).group_by(Source.readable)).all()
+        edited = sum(1 for o in outs if versions.get(o.id, 0) > 0)
+    return {"outputs": len(outs), "kinds": dict(kinds), "status": dict(status), "generators": dict(gens), "exports": dict(fmts),
+            "ai_jobs": {k: n for k, n in jobs}, "activity_days": dict(sorted(days.items())[-14:]),
+            "sources": {"readable": sum(n for r, n in srcs if r), "unreadable": sum(n for r, n in srcs if not r)},
+            "edited": edited, "total_versions": sum(versions.values())}

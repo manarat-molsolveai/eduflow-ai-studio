@@ -1,5 +1,5 @@
 import streamlit as st
-from core import svc, gen, ai
+from core import svc, gen, ai, templates
 from ui import *
 
 STEPS = ["نوع المشروع", "الجمهور", "المحتوى", "الأهداف", "المخرجات", "التصميم", "خطة الإنتاج"]
@@ -27,11 +27,17 @@ def render(uid):
         keys = list(gen.PROJECT_TYPES)
         pt = st.selectbox("نوع المشروع", keys, index=keys.index(p["ptype"]) if p else 0, format_func=gen.PROJECT_TYPES.get)
         desc = st.text_area("وصف مختصر (اختياري)", value=p["description"] if p else "")
+        tpl = ""
+        if not p:
+            tpl = st.selectbox("ابدأ من قالب (اختياري)", list(templates.TEMPLATES), format_func=lambda k: templates.TEMPLATES[k]["label"] + (" - " + templates.TEMPLATES[k]["desc"] if k else ""))
+            st.caption("القالب يملأ الأهداف وخطة المخرجات مسبقًا فقط، ويمكنك تعديلها بالكامل في الخطوات التالية. لا يضيف محتوى من عنده.")
         if nav(bool(name.strip())):
             if p:
                 svc.update_project(uid, pid, name=name.strip(), ptype=pt, description=desc)
             else:
-                st.session_state["wz_pid"] = svc.create_project(uid, {"name": name, "ptype": pt, "description": desc, "settings": {"language": "العربية"}})
+                data = {"name": name, "ptype": pt, "description": desc, "settings": {"language": "العربية"}}
+                data.update({k: v for k, v in templates.apply(tpl, name.strip()).items() if k != "ptype"})
+                st.session_state["wz_pid"] = svc.create_project(uid, data)
             st.session_state["wz_step"] = 1; st.rerun()
         return
     if not p:

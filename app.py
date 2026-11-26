@@ -69,7 +69,7 @@ if not user:
     logout()
 page = st.session_state.get("page", "dashboard")
 
-NAV = [("dashboard", "🏠  لوحة التحكم"), ("new", "➕  مشروع جديد"), ("projects", "📁  المشاريع"), ("library", "🗂️  المكتبة والملفات"),
+NAV = [("dashboard", "🏠  لوحة التحكم"), ("new", "➕  مشروع جديد"), ("projects", "📁  المشاريع"), ("library", "🗂️  المكتبة والملفات"), ("analytics", "📊  التحليلات"),
        ("settings", "⚙️  الإعدادات والذكاء الاصطناعي"), ("status", "✅  حالة النظام")]
 with st.sidebar:
     st.markdown(f"### 🎓 EduFlow\n<small>استوديو الإنتاج التعليمي الذكي</small>", unsafe_allow_html=True)
@@ -150,5 +150,6 @@ elif page == "new": v_wizard.render(uid)
 elif page == "projects": projects_page()
 elif page == "project": v_work.workspace(uid)
 elif page == "library": v_misc.library(uid)
+elif page == "analytics": v_misc.analytics(uid)
 elif page == "settings": v_misc.settings(uid)
 elif page == "status": v_misc.status(uid)

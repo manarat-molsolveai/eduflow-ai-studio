@@ -116,8 +116,9 @@ FEATURES = [
     ("الواجهة بالإنجليزية", "غير منفّذ (المحتوى يدعم الإنجليزية، الواجهة عربية)"),
     ("Video Studio / Game Studio", "غير منفّذ (المرحلة 3)"),
     ("إدارة العملاء / المالية / الأتمتة", "غير منفّذ (المرحلة 3)"),
-    ("Analytics Studio", "غير منفّذ (المرحلة 2)"),
-    ("القوالب / سير العمل المخصص / متعدد المستخدمين", "غير منفّذ"),
+    ("التحليلات (أرقام حقيقية من بياناتك)", "منفّذ"),
+    ("قوالب جاهزة (3) تملأ الأهداف وخطة المخرجات", "منفّذ أساسي"),
+    ("قوالب يحفظها المستخدم / سير عمل مخصص / متعدد المستخدمين", "غير منفّذ"),
     ("الحفظ التلقائي أثناء الكتابة", "غير منفّذ: الحفظ بزر «حفظ»"),
 ]
 
@@ -138,3 +139,36 @@ def status(uid):
     st.markdown("### الوظائف")
     for f, s in FEATURES:
         st.markdown(f"- {f} — " + (badge(s) if s.startswith("منفّذ") else badge(s, "warn" if "مبنية" in s else "err")), unsafe_allow_html=True)
+
+
+def analytics(uid):
+    st.markdown("## التحليلات")
+    st.caption("أرقام حقيقية محسوبة من بياناتك فقط. لا توجد تقديرات ولا بيانات تجريبية. تتعلق بحسابك وحده.")
+    a = svc.analytics(uid)
+    if not a["outputs"]:
+        empty("لا بيانات بعد", "أنتج مخرجًا واحدًا على الأقل لتظهر التحليلات.")
+        return
+    c = st.columns(4)
+    c[0].markdown(stat(a["outputs"], "إجمالي المخرجات"), unsafe_allow_html=True)
+    c[1].markdown(stat(a["edited"], "مخرجات عُدّلت"), unsafe_allow_html=True)
+    c[2].markdown(stat(a["total_versions"], "إصدارات محفوظة"), unsafe_allow_html=True)
+    c[3].markdown(stat(sum(a["exports"].values()), "ملفات مصدّرة"), unsafe_allow_html=True)
+    st.write("")
+    l, r = st.columns(2)
+    with l:
+        st.subheader("المخرجات حسب النوع")
+        st.bar_chart({v_work.KIND_AR.get(k, k): n for k, n in a["kinds"].items()}, color="#16A6A1")
+        st.subheader("طريقة التوليد")
+        st.bar_chart({("قواعد محلية" if g == "local-rules" else g): n for g, n in a["generators"].items()}, color="#7C5CFC")
+    with r:
+        st.subheader("حالة المخرجات")
+        st.bar_chart(a["status"], color="#16A6A1")
+        st.subheader("الصيغ المصدّرة")
+        if a["exports"]: st.bar_chart({k.upper(): n for k, n in a["exports"].items()}, color="#F5A524")
+        else: st.caption("لا ملفات مصدّرة بعد.")
+    st.subheader("نشاط آخر 14 يوم عمل")
+    st.bar_chart(a["activity_days"], color="#16A6A1")
+    ok = a["ai_jobs"].get("done", 0)
+    tot = sum(a["ai_jobs"].values())
+    st.markdown(f"**مهام الذكاء الاصطناعي الحقيقية:** {tot}" + (f" (نجح {ok}، فشل أو غير مكتمل: {tot - ok})" if tot else " (لم تُشغَّل بعد)"))
+    st.markdown(f"**المصادر:** مقروءة {a['sources']['readable']} • غير مقروءة {a['sources']['unreadable']}")
