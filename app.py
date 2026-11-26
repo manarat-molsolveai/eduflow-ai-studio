@@ -4,7 +4,7 @@ st.set_page_config(page_title="استوديو الإنتاج التعليمي ا
 
 # Hot-reload edited app modules so a redeploy takes effect without a restart (a restart wipes the temporary database).
 import importlib, os, sys
-_HOT = ["core.templates", "core.gen", "core.quality", "core.export", "core.svc", "ui", "v_work", "v_misc", "v_wizard"]
+_HOT = ["core.ai", "core.templates", "core.gen", "core.quality", "core.export", "core.svc", "ui", "v_work", "v_misc", "v_wizard"]
 _seen = sys.__dict__.setdefault("_ef_mtimes", {})
 _changed = False
 for _n in _HOT:
