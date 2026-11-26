@@ -87,14 +87,20 @@ def delete_account_ui(uid):
     st.markdown("### حذف الحساب")
     with st.expander("حذف حسابي وكل بياناتي نهائيًا"):
         st.warning("يحذف الحساب وجميع المشاريع والملفات والمخرجات. لا يمكن التراجع.")
-        pw = st.text_input("كلمة المرور للتأكيد", type="password", key="del_pw")
-        sure = st.checkbox("أفهم أن الحذف نهائي", key="del_ok")
-        if st.button("حذف الحساب نهائيًا", disabled=not sure):
-            ok, msg = __import__("core.auth", fromlist=["x"]).delete_account(uid, pw)
-            if ok:
-                st.session_state.clear(); st.query_params.clear(); st.rerun()
+        # st.form: كل الحقول تُرسل دفعة واحدة عند الضغط، فلا يصل زر الحذف قبل مزامنة كلمة المرور.
+        with st.form("del_account_form"):
+            pw = st.text_input("كلمة المرور للتأكيد", type="password")
+            sure = st.checkbox("أفهم أن الحذف نهائي")
+            submitted = st.form_submit_button("حذف الحساب نهائيًا")
+        if submitted:
+            if not sure:
+                st.error("أكّد أنك تفهم أن الحذف نهائي")
             else:
-                st.error(msg)
+                ok, msg = __import__("core.auth", fromlist=["x"]).delete_account(uid, pw)
+                if ok:
+                    st.session_state.clear(); st.query_params.clear(); st.rerun()
+                else:
+                    st.error(msg)
 
 
 FEATURES = [
