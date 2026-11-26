@@ -1,7 +1,7 @@
 """Rule-based quality review (documented, deterministic). Dimensions that rules cannot judge are marked
 'needs human/AI review' and excluded from the numeric score."""
 import re, json
-from .gen import PH
+from .gen import PH, q_answer
 
 WEIGHTS = {"structure": 20, "completeness": 25, "language": 15, "audience": 15, "usability": 10, "source_integrity": 15}
 RULES = [
@@ -9,7 +9,7 @@ RULES = [
     "completeness: خلو المحتوى من علامات [اكتب هنا] والحقول الفارغة",
     "language: نسبة الحروف العربية تطابق لغة المشروع",
     "audience: طول النقاط والجمل مناسب للمرحلة",
-    "usability: ملاحظات المعلم/تعليمات/مفتاح إجابة موجودة",
+    "usability: ملاحظات المعلم/تعليمات/مفتاح إجابة/سلم تقييم موجودة",
     "source_integrity: وجود مصادر مرتبطة، وتوضيح طريقة التوليد",
 ]
 UNJUDGED = ["accuracy (الدقة العلمية)", "educational_alignment (المواءمة مع المنهج)", "visual_quality (الجودة البصرية)"]
@@ -20,7 +20,16 @@ def _texts(kind, c):
         return [s["title"] for s in c["slides"]] + [b for s in c["slides"] for b in s["bullets"]]
     if kind == "document":
         return [s["heading"] for s in c["sections"]] + [s["body"] for s in c["sections"]]
-    return [q["text"] for q in c["questions"]] + [o for q in c["questions"] for o in q.get("options", [])]
+    ts = [c.get("instructions", "")]
+    for q in c["questions"]:
+        ts.append(q.get("text", ""))
+        ts += [str(o) for o in q.get("options", [])]
+        ts += [str(x) for pr in q.get("pairs", []) for x in pr]
+        ts += [str(x) for x in q.get("items", [])]
+    ts += [str(o) for o in c.get("objectives", [])]
+    ts += [str(a.get("title", "")) + " " + str(a.get("body", "")) for a in c.get("activities", [])]
+    ts += [str(r.get("criterion", "")) for r in c.get("rubric", [])]
+    return ts
 
 
 def review(kind, c, project, n_sources, generator):
@@ -83,8 +92,15 @@ def review(kind, c, project, n_sources, generator):
     us = 100
     if kind == "presentation" and not any(s.get("notes", "").strip() for s in c["slides"]):
         us -= 40; tips.append("أضف ملاحظات للمعلم في الشرائح المهمة")
-    if kind == "assessment" and any(not q.get("answer") for q in c["questions"]):
+    if kind == "assessment" and any(not q_answer(q) for q in c["questions"]):
         us -= 40; warn.append("أسئلة بلا مفتاح إجابة")
+    if kind == "assessment":
+        if not c.get("rubric"):
+            us -= 15; tips.append("أضف سلم تقييم (Rubric) من تبويب التحرير — زر «اقتراح سلم» يبني مسودة من أسئلتك")
+        else:
+            tot = sum(float(r.get("weight", 0) or 0) for r in c["rubric"])
+            if abs(tot - 100) > 5:
+                warn.append(f"أوزان سلم التقييم مجموعها {tot:g}% وليس 100%")
     if kind == "worksheet" and not c.get("instructions"):
         us -= 30; warn.append("لا توجد تعليمات")
     dims["usability"] = max(us, 0)
@@ -100,4 +116,4 @@ def review(kind, c, project, n_sources, generator):
     else:
         verdict = "approved"
     return {"score": score, "verdict": verdict, "dims": dims, "weights": WEIGHTS, "warnings": warn, "errors": err,
-            "suggestions": tips, "unjudged": UNJUDGED, "rules": RULES, "method": "rules-v1", "generator": generator}
+            "suggestions": tips, "unjudged": UNJUDGED, "rules": RULES, "method": "rules-v2", "generator": generator}

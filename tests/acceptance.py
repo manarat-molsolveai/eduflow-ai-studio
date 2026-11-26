@@ -3,7 +3,7 @@ import os, sys, tempfile, io, json
 tmp = tempfile.mkdtemp()
 os.environ["DATABASE_URL"] = f"sqlite:///{tmp}/t.db"
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from core import db, auth, svc, ai, export as ex
+from core import db, auth, svc, ai, gen, export as ex
 from streamlit.testing.v1 import AppTest
 
 R = []
@@ -51,7 +51,37 @@ def T10():
     assert "عنوان معدل" in " ".join(texts); return f"{len(p.slides)} شريحة، نصوص قابلة للتحرير"
 def T11():
     oid, err = svc.produce(A, ctx["pid"], "worksheet", "", 5); assert not err and svc.get_output(A, oid)["content"]["questions"]
+    c = svc.get_output(A, oid)["content"]
+    assert "objectives" in c and "activities" in c and c.get("style") in gen.WORKSHEET_STYLES, "بنية ورقة العمل ناقصة"
     fid, m = svc.do_export(A, oid, "docx"); assert fid, m
+    fid, m = svc.do_export(A, oid, "pdf"); assert fid, m
+def T21():
+    pid = svc.create_project(A, {"name": "اختبار متقدم", "objectives": ["أ", "ب", "ج"], "settings": {"language": "العربية"}})
+    oid, err = svc.produce(A, pid, "assessment", "", 6); assert not err, err
+    o = svc.get_output(A, oid); c = o["content"]
+    c["questions"] = [
+        {"type": "matching", "text": "صِل المصطلح بتعريفه", "options": [], "items": [],
+         "pairs": [["التبخر", "تحول السائل إلى بخار"], ["التكاثف", "تحول البخار إلى سائل"], ["الهطول", "سقوط الماء من الغيوم"]],
+         "answer": "", "points": 3, "skill": "فهم", "difficulty": "متوسط"},
+        {"type": "ordering", "text": "رتّب مراحل دورة الماء", "options": [], "pairs": [],
+         "items": ["التبخر", "التكاثف", "الهطول"], "answer": "", "points": 2, "skill": "ترتيب", "difficulty": "سهل"},
+        {"type": "mcq", "text": "ما مصدر طاقة دورة الماء؟", "options": ["الشمس", "الرياح", "القمر"], "pairs": [], "items": [],
+         "answer": "الشمس", "points": 1, "skill": "استدعاء", "difficulty": "سهل"}]
+    c["rubric"] = gen.suggest_rubric(c)
+    assert abs(sum(r["weight"] for r in c["rubric"]) - 100) < 0.01, "أوزان السلم ليست 100"
+    assert "⇐" in gen.q_answer(c["questions"][0]) and "ثم" in gen.q_answer(c["questions"][1])
+    svc.save_output(A, oid, c)
+    r = svc.run_review(A, oid); assert svc.gate_open(A, oid), f"البوابة مغلقة: {r['score']}"
+    for fmt in ("pdf", "docx", "xlsx", "html", "csv"):
+        fid, m = svc.do_export(A, oid, fmt); assert fid, m
+    assert "التبخر" in svc.get_export(A, fid)["blob"].decode("utf-8-sig")
+    return "مطابقة+ترتيب+سلم تقييم، و5 صيغ تصدير سليمة"
+def T22():
+    old = {"title": "أ", "questions": [{"text": "س1", "type": "short", "options": [], "pairs": [], "items": []}]}
+    new = {"title": "ب", "questions": [old["questions"][0], {"text": "س2", "type": "mcq", "options": ["1"], "pairs": [], "items": []}]}
+    d = gen.diff_summary("assessment", old, new)
+    assert any("العنوان" in x for x in d) and any("أُضيف 1 سؤال" in x for x in d), d
+    return " | ".join(d)
 def T13(): assert len(svc.list_projects(A, q="معدل")) == 1 and not svc.list_projects(A, q="لا يوجد شيء كهذا")
 def T15():
     assert svc.get_project(B, ctx["pid"]) is None and not svc.delete_project(B, ctx["pid"]) and svc.get_output(B, ctx["o"]) is None
@@ -78,7 +108,7 @@ def T16(): return "MANUAL: اختبار يدوي بلقطة هاتف على ال
 
 for n, f in [("T01 إنشاء مشروع", T01), ("T02 تعديل", T02), ("T03 حفظ", T03), ("T04 إعادة فتح", T04), ("T05 رفع ملف", T05), ("T06 إنشاء عرض", T06),
              ("T07 تعديل شريحة", T07), ("T08 حفظ التعديل", T08), ("T12 مراجعة الجودة", T12), ("T09 تصدير", T09), ("T10 فحص الملف", T10),
-             ("T11 ورقة عمل", T11), ("T13 بحث", T13), ("T15 الصلاحيات", T15), ("T14 حذف بتأكيد", T14), ("T17 Error State", T17),
+             ("T11 ورقة عمل", T11), ("T21 استوديو الاختبارات", T21), ("T22 ملخص الفروق", T22), ("T13 بحث", T13), ("T15 الصلاحيات", T15), ("T14 حذف بتأكيد", T14), ("T17 Error State", T17),
              ("T19 فشل API", T19), ("T20 استمرارية", T20), ("T18 تكامل AI", T18), ("T16 الهاتف", T16)]:
     t(n, f)
 for r in R: print(*r, sep=" | ")

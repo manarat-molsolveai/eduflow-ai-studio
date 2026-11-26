@@ -143,7 +143,7 @@ def editor(uid, p, o):
     with t_edit:
         if o["kind"] == "presentation": edit_slides(uid, p, oid, c)
         elif o["kind"] == "document": edit_doc(oid, c)
-        else: edit_questions(oid, c)
+        else: edit_questions(oid, c, o["kind"])
         if st.button("حفظ التعديلات", type="primary", key=f"save{oid}"):
             sync(oid, o["kind"], c)
             svc.save_output(uid, oid, c, title=c.get("title"))
@@ -160,7 +160,10 @@ def editor(uid, p, o):
         if not vs: st.info("لا توجد إصدارات سابقة بعد.")
         for v in vs:
             c1, c2 = st.columns([4, 1])
-            c1.markdown(f"v{v['version']} • {fmt_dt(v['created_at'])} • {esc(v['note'])}")
+            c1.markdown(f"**v{v['version']}** • {fmt_dt(v['created_at'])} • {esc(v['note'])}")
+            c1.caption("مقارنة بالحالي: " + "، ".join(gen.diff_summary(o["kind"], v["content"], o["content"])))
+            with c1.expander(f"معاينة v{v['version']}"):
+                preview(o["kind"], v["content"])
             if c2.button("استرجاع", key=f"rv{v['id']}"):
                 svc.save_output(uid, oid, v["content"], note=f"استرجاع v{v['version']}"); st.rerun()
 
@@ -182,10 +185,30 @@ def sync(oid, kind, c):
             s["heading"] = g(f"h{i}", s["heading"]); s["body"] = g(f"b{i}", s["body"])
     else:
         c["instructions"] = g("instr", c.get("instructions", ""))
+        if kind == "worksheet":
+            c["style"] = g("sty", c.get("style", "print"))
+            c["objectives"] = [x.strip() for x in g("obj", "\n".join(c.get("objectives", []))).splitlines() if x.strip()]
+            for i, a in enumerate(c.get("activities", [])):
+                a["title"] = g(f"at{i}", a.get("title", "نشاط")); a["body"] = g(f"ab{i}", a.get("body", ""))
+        if kind == "assessment":
+            for i, r in enumerate(c.get("rubric", [])):
+                r["criterion"] = g(f"rc{i}", r.get("criterion", "")); r["weight"] = g(f"rw{i}", r.get("weight", 0))
+                r["excellent"] = g(f"re{i}", r.get("excellent", "")); r["good"] = g(f"rg{i}", r.get("good", ""))
+                r["poor"] = g(f"rp{i}", r.get("poor", ""))
         for i, q in enumerate(c["questions"]):
             q["type"] = g(f"ty{i}", q["type"]); q["text"] = g(f"q{i}", q["text"])
-            q["options"] = [x.strip() for x in g(f"op{i}", "\n".join(q.get("options", []))).splitlines() if x.strip()]
-            q["answer"] = g(f"an{i}", q.get("answer", "")); q["points"] = g(f"pt{i}", q.get("points", 1))
+            if q["type"] == "matching":
+                L = [x.strip() for x in g(f"pl{i}", "\n".join(a for a, _ in q.get("pairs", []))).splitlines()]
+                R = [x.strip() for x in g(f"pr{i}", "\n".join(b for _, b in q.get("pairs", []))).splitlines()]
+                q["pairs"] = [[a, b] for a, b in zip(L, R) if a and b]; q["options"] = []
+                q["answer"] = ""
+            elif q["type"] == "ordering":
+                q["items"] = [x.strip() for x in g(f"it{i}", "\n".join(q.get("items", []))).splitlines() if x.strip()]
+                q["options"] = []; q["answer"] = ""
+            else:
+                q["options"] = [x.strip() for x in g(f"op{i}", "\n".join(q.get("options", []))).splitlines() if x.strip()]
+                q["answer"] = g(f"an{i}", q.get("answer", ""))
+            q["points"] = g(f"pt{i}", q.get("points", 1))
             q["skill"] = g(f"sk{i}", q.get("skill", "")); q["difficulty"] = g(f"df{i}", q.get("difficulty", "متوسط"))
 
 
@@ -242,28 +265,69 @@ def edit_doc(oid, c):
         _add(oid, "document", c, "sections", {"heading": "قسم جديد", "body": ""})
 
 
-def edit_questions(oid, c):
+def edit_questions(oid, c, kind):
     st.text_input("العنوان", c.get("title", ""), key=f"w{oid}_title")
     st.text_area("التعليمات", c.get("instructions", ""), key=f"w{oid}_instr")
-    types = ["mcq", "tf", "short", "fill", "essay"]
-    TY = {"mcq": "اختيار من متعدد", "tf": "صح/خطأ", "short": "إجابة قصيرة", "fill": "أكمل الفراغ", "essay": "مقالي"}
+    if kind == "worksheet":
+        stys = list(gen.WORKSHEET_STYLES)
+        st.selectbox("نمط الورقة (يغيّر الألوان والتنسيق في ملف التصدير فقط)", stys,
+                     index=stys.index(c.get("style")) if c.get("style") in stys else 0,
+                     format_func=gen.WORKSHEET_STYLES.get, key=f"w{oid}_sty")
+        st.text_area("أهداف الورقة (هدف في كل سطر)", "\n".join(c.get("objectives", [])), key=f"w{oid}_obj")
+        st.subheader("الأنشطة")
+        for i, a in enumerate(c.get("activities", [])):
+            with st.expander(f"{i+1}. {a.get('title','نشاط')[:50]}", expanded=i == 0):
+                st.text_input("عنوان النشاط", a.get("title", ""), key=f"w{oid}_at{i}")
+                st.text_area("خطوات النشاط", a.get("body", ""), key=f"w{oid}_ab{i}", height=110)
+                x, y, z = st.columns(3)
+                if x.button("↑ أعلى", key=f"upa{oid}{i}"): _move(oid, kind, c, "activities", i, -1)
+                if y.button("↓ أسفل", key=f"dna{oid}{i}"): _move(oid, kind, c, "activities", i, 1)
+                if z.button("حذف النشاط", key=f"rma{oid}{i}"): _del(oid, kind, c, "activities", i)
+        if st.button("+ إضافة نشاط", key=f"adda{oid}"):
+            _add(oid, kind, c, "activities", {"title": "نشاط جديد", "body": ""})
+    if kind == "assessment":
+        st.subheader("سلم التقييم (Rubric)")
+        st.caption("يُصدَّر مع الاختبار بعد نموذج الإجابة. يُنصح أن يكون مجموع الأوزان 100%.")
+        if st.button("⚖ اقتراح سلم من الأسئلة (قاعدة محلية من مهارات أسئلتك، ليس ذكاءً اصطناعيًا)", key=f"rub{oid}"):
+            sync(oid, kind, c); c["rubric"] = gen.suggest_rubric(c); _clear(oid); st.rerun()
+        for i, r in enumerate(c.get("rubric", [])):
+            with st.expander(f"{i+1}. {r.get('criterion','')[:40]}", expanded=i == 0):
+                st.text_input("المعيار", r.get("criterion", ""), key=f"w{oid}_rc{i}")
+                st.number_input("الوزن %", 0.0, 100.0, float(r.get("weight", 0) or 0), key=f"w{oid}_rw{i}")
+                st.text_input("ممتاز", r.get("excellent", ""), key=f"w{oid}_re{i}")
+                st.text_input("جيد", r.get("good", ""), key=f"w{oid}_rg{i}")
+                st.text_input("يحتاج دعمًا", r.get("poor", ""), key=f"w{oid}_rp{i}")
+                if st.button("حذف المعيار", key=f"rmr{oid}{i}"): _del(oid, kind, c, "rubric", i)
+        if st.button("+ إضافة معيار", key=f"addr{oid}"):
+            _add(oid, kind, c, "rubric", {"criterion": "معيار جديد", "weight": 20.0, "excellent": "", "good": "", "poor": ""})
+    st.subheader("الأسئلة")
+    types = list(gen.Q_TYPES)
     for i, q in enumerate(c["questions"]):
         with st.expander(f"{i+1}. {q['text'][:50]}", expanded=i == 0):
-            st.selectbox("النوع", types, index=types.index(q["type"]) if q["type"] in types else 2, format_func=TY.get, key=f"w{oid}_ty{i}")
+            st.selectbox("النوع", types, index=types.index(q["type"]) if q["type"] in types else 4, format_func=gen.Q_TYPES.get, key=f"w{oid}_ty{i}")
+            cur_ty = st.session_state.get(f"w{oid}_ty{i}", q["type"])
             st.text_area("نص السؤال", q["text"], key=f"w{oid}_q{i}")
-            st.text_area("الخيارات (خيار في كل سطر)", "\n".join(q.get("options", [])), key=f"w{oid}_op{i}", height=80)
-            st.text_input("الإجابة الصحيحة", q.get("answer", ""), key=f"w{oid}_an{i}")
+            if cur_ty == "matching":
+                st.caption("كل سطر في العمودين يمثل زوجًا مرتبطًا. تُخلط الإجابات في نسخة الطالب ويظهر الربط الصحيح في نموذج الإجابة.")
+                x, y = st.columns(2)
+                x.text_area("العمود الأول (مصطلحات)", "\n".join(a for a, _ in q.get("pairs", [])), key=f"w{oid}_pl{i}", height=110)
+                y.text_area("العمود الثاني (المقابل الصحيح لكل سطر)", "\n".join(b for _, b in q.get("pairs", [])), key=f"w{oid}_pr{i}", height=110)
+            elif cur_ty == "ordering":
+                st.text_area("البنود بالترتيب الصحيح (بند في كل سطر) — تُخلط في نسخة الطالب", "\n".join(q.get("items", [])), key=f"w{oid}_it{i}", height=110)
+            else:
+                st.text_area("الخيارات (خيار في كل سطر)", "\n".join(q.get("options", [])), key=f"w{oid}_op{i}", height=80)
+                st.text_input("الإجابة الصحيحة", q.get("answer", ""), key=f"w{oid}_an{i}")
             x, y, z = st.columns(3)
             x.number_input("الدرجة", 0.0, 100.0, float(q.get("points", 1)), key=f"w{oid}_pt{i}")
             y.text_input("المهارة", q.get("skill", ""), key=f"w{oid}_sk{i}")
             dfs = ["سهل", "متوسط", "صعب"]
             z.selectbox("الصعوبة", dfs, index=dfs.index(q.get("difficulty")) if q.get("difficulty") in dfs else 1, key=f"w{oid}_df{i}")
             a, b, d = st.columns(3)
-            if a.button("↑ أعلى", key=f"up{oid}{i}"): _move(oid, "q", c, "questions", i, -1)
-            if b.button("↓ أسفل", key=f"dn{oid}{i}"): _move(oid, "q", c, "questions", i, 1)
-            if d.button("حذف السؤال", key=f"rm{oid}{i}"): _del(oid, "q", c, "questions", i)
+            if a.button("↑ أعلى", key=f"up{oid}{i}"): _move(oid, kind, c, "questions", i, -1)
+            if b.button("↓ أسفل", key=f"dn{oid}{i}"): _move(oid, kind, c, "questions", i, 1)
+            if d.button("حذف السؤال", key=f"rm{oid}{i}"): _del(oid, kind, c, "questions", i)
     if st.button("+ إضافة سؤال", key=f"add{oid}"):
-        _add(oid, "q", c, "questions", {"type": "short", "text": "سؤال جديد", "options": [], "answer": "", "points": 1, "skill": "", "difficulty": "متوسط"})
+        _add(oid, kind, c, "questions", {"type": "short", "text": "سؤال جديد", "options": [], "pairs": [], "items": [], "answer": "", "points": 1, "skill": "", "difficulty": "متوسط"})
 
 
 def preview(kind, c):
@@ -280,9 +344,26 @@ def preview(kind, c):
             st.markdown(f"**{esc(s['heading'])}**"); st.text(s["body"])
     else:
         st.markdown(f"## {esc(c.get('title',''))}", unsafe_allow_html=True); st.write(c.get("instructions", ""))
+        if kind == "worksheet":
+            if c.get("objectives"):
+                st.markdown("**الأهداف**")
+                for o in c["objectives"]: st.markdown(f"- {esc(o)}")
+            for a in c.get("activities", []):
+                st.markdown(f"**{esc(a.get('title','نشاط'))}**"); st.text(a.get("body", ""))
         for i, q in enumerate(c["questions"], 1):
             st.markdown(f"**{i}. {esc(q['text'])}** ({q.get('points',1)})")
-            for o in q.get("options", []): st.markdown(f"- {esc(o)}")
+            if q.get("type") == "matching" and q.get("pairs"):
+                for j, (a, _) in enumerate(q["pairs"], 1): st.markdown(f"{j}) {esc(a)}  .....  (   )")
+                st.caption("الاختيارات تُخلط في الملف المصدَّر، والربط الصحيح في نموذج الإجابة")
+            elif q.get("type") == "ordering" and q.get("items"):
+                for it in q["items"]: st.markdown(f"(  ) {esc(it)}")
+                st.caption("تُخلط البنود في الملف المصدَّر، والترتيب الصحيح في نموذج الإجابة")
+            else:
+                for o in q.get("options", []): st.markdown(f"- {esc(o)}")
+        if kind == "assessment" and c.get("rubric"):
+            st.markdown("**سلم التقييم**")
+            for r in c["rubric"]:
+                st.markdown(f"- {esc(r['criterion'])} ({float(r.get('weight',0) or 0):g}%)")
 
 
 def quality_tab(uid, o):

@@ -1,5 +1,5 @@
 """Real exporters. Each returns bytes; verify_* re-opens the produced bytes to prove they are valid."""
-import io, os, csv, zipfile, html as _html
+import io, os, csv, random, zipfile, zlib, html as _html
 from pptx import Presentation
 from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
@@ -9,6 +9,26 @@ from pptx.oxml.ns import qn
 from lxml import etree
 
 NAVY, TEAL, LIGHT, PURPLE, GOLD = "14263D", "16A6A1", "F5F7FA", "7568D8", "E6B85C"
+WSTYLES = {"print": {"accent": NAVY, "alt": "8A97A6"}, "color": {"accent": TEAL, "alt": GOLD},
+           "minimal": {"accent": "5A6B7D", "alt": "9AA7B4"}, "class": {"accent": PURPLE, "alt": TEAL}}
+_AR_L = "أبجدهوزحطي"
+
+
+def _aletter(j):
+    return _AR_L[j] if j < len(_AR_L) else str(j + 1)
+
+
+def _shuffled(items, seed_text):
+    """Deterministic shuffle (stable across runs) so the student version hides the answer order."""
+    r = random.Random(zlib.crc32(str(seed_text).encode("utf-8")))
+    L = list(items)
+    r.shuffle(L)
+    return L
+
+
+def _q_answer(q):
+    from .gen import q_answer
+    return q_answer(q)
 FONTS = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fonts")
 rgb = lambda h: RGBColor.from_string(h)
 
@@ -211,27 +231,69 @@ def pdf_slides(content):
     return p.done()
 
 
+def _pdf_question(p, i, q, kind):
+    p.line(f"{i}. {q['text']}  ({q.get('points', 1):g})", 14, True, gap=4)
+    if q.get("type") == "matching" and q.get("pairs"):
+        rights = _shuffled([b for _, b in q["pairs"]], q["text"])
+        for j, (a, _) in enumerate(q["pairs"], 1):
+            p.line(f"{j}) {a}  .......  (   )", 13, indent=18, gap=2)
+        p.line("الاختيارات: " + "    ".join(f"{_aletter(k)}) {r}" for k, r in enumerate(rights)), 13, indent=18, color="8A97A6", gap=10)
+    elif q.get("type") == "ordering" and q.get("items"):
+        for it in _shuffled(q["items"], q["text"]):
+            p.line(f"(  ) {it}", 13, indent=18, gap=2)
+        p.line("اكتب الترتيب الصحيح بالأرقام داخل الأقواس", 11, indent=18, color="8A97A6", gap=10)
+    else:
+        for j, o in enumerate(q.get("options", [])):
+            p.line(f"{_aletter(j)}) {o}", 13, indent=18, gap=2)
+        if kind == "worksheet" or q.get("type") in ("short", "essay", "fill"):
+            p.line("الإجابة: " + "_" * 40, 13, color="8A97A6", gap=10)
+
+
+def _pdf_rubric(p, content, accent):
+    rub = content.get("rubric") or []
+    if not rub:
+        return
+    p.line("سلم التقييم (Rubric)", 16, True, accent, gap=6)
+    for r in rub:
+        p.line(f"• {r['criterion']} — {float(r.get('weight', 0) or 0):g}%", 13, True, gap=2)
+        det = " | ".join(x for x in [f"ممتاز: {r.get('excellent', '')}" if r.get("excellent") else "",
+                                     f"جيد: {r.get('good', '')}" if r.get("good") else "",
+                                     f"يحتاج دعمًا: {r.get('poor', '')}" if r.get("poor") else ""] if x)
+        if det:
+            p.line(det, 12, indent=14, color="444444", gap=8)
+
+
 def pdf_doc(content, kind="document"):
+    sty = WSTYLES.get(content.get("style", "print"), WSTYLES["print"])
     p = _Pdf()
     p.line(content.get("title", ""), 22, True, NAVY, gap=14)
     if kind == "document":
         for s in content["sections"]:
             p.line(s["heading"], 16, True, TEAL, gap=4)
             p.line(s["body"], 13, gap=12)
-    else:
-        if content.get("instructions"):
-            p.line(content["instructions"], 13, gap=12)
+        return p.done()
+    if content.get("instructions"):
+        p.line(content["instructions"], 13, gap=12)
+    if kind == "worksheet":
+        if content.get("objectives"):
+            p.line("الأهداف", 16, True, sty["accent"], gap=4)
+            for o in content["objectives"]:
+                p.line("• " + o, 13, indent=12, gap=2)
+            p.line(" ", 6, gap=8)
+        if content.get("activities"):
+            p.line("الأنشطة", 16, True, sty["accent"], gap=4)
+            for a in content["activities"]:
+                p.line(a.get("title", "نشاط"), 14, True, NAVY, gap=2)
+                p.line(str(a.get("body", "")), 13, indent=12, gap=8)
+        p.line("الأسئلة", 16, True, sty["accent"], gap=8)
+    for i, q in enumerate(content["questions"], 1):
+        _pdf_question(p, i, q, kind)
+    if kind == "assessment":
+        p.page()
+        p.line("نموذج الإجابة", 18, True, TEAL, gap=8)
         for i, q in enumerate(content["questions"], 1):
-            p.line(f"{i}. {q['text']}  ({q.get('points', 1)})", 14, True, gap=4)
-            for j, o in enumerate(q.get("options", [])):
-                p.line(f"{'أبجد'[j] if j < 4 else j+1}) {o}", 13, indent=18, gap=2)
-            if kind == "worksheet" or q["type"] in ("short", "essay", "fill"):
-                p.line("الإجابة: " + "_" * 40, 13, color="8A97A6", gap=10)
-        if kind == "assessment":
-            p.page()
-            p.line("نموذج الإجابة", 18, True, TEAL)
-            for i, q in enumerate(content["questions"], 1):
-                p.line(f"{i}. {q.get('answer') or '(لا توجد إجابة)'}", 13)
+            p.line(f"{i}. {_q_answer(q) or '(لا توجد إجابة)'}", 13)
+        _pdf_rubric(p, content, TEAL)
     return p.done()
 
 
@@ -266,8 +328,27 @@ def _docx_rtl(par, run_size=12, bold=False, color=None, align=2):
         rf.set(qn("w:hAnsi"), "Arial")
 
 
+def _docx_question(d, i, q, kind):
+    _docx_rtl(d.add_paragraph(f"{i}. {q['text']}  ({float(q.get('points', 1) or 0):g})"), 13, True)
+    if q.get("type") == "matching" and q.get("pairs"):
+        rights = _shuffled([b for _, b in q["pairs"]], q["text"])
+        for j, (a, _) in enumerate(q["pairs"], 1):
+            _docx_rtl(d.add_paragraph(f"{j}) {a}  .......  (   )"), 12)
+        _docx_rtl(d.add_paragraph("الاختيارات: " + "    ".join(f"{_aletter(k)}) {r}" for k, r in enumerate(rights))), 12, color="8A97A6")
+    elif q.get("type") == "ordering" and q.get("items"):
+        for it in _shuffled(q["items"], q["text"]):
+            _docx_rtl(d.add_paragraph(f"(  ) {it}"), 12)
+        _docx_rtl(d.add_paragraph("اكتب الترتيب الصحيح بالأرقام داخل الأقواس"), 10, color="8A97A6")
+    else:
+        for j, o in enumerate(q.get("options", [])):
+            _docx_rtl(d.add_paragraph(f"{_aletter(j)}) {o}"), 12)
+        if kind == "worksheet" or q.get("type") in ("short", "essay", "fill"):
+            _docx_rtl(d.add_paragraph("الإجابة: " + "_" * 45), 12, color="8A97A6")
+
+
 def docx_doc(content, kind="document"):
     import docx
+    sty = WSTYLES.get(content.get("style", "print"), WSTYLES["print"])
     d = docx.Document()
     p = d.add_paragraph(content.get("title", ""))
     _docx_rtl(p, 22, True, NAVY)
@@ -281,17 +362,35 @@ def docx_doc(content, kind="document"):
     else:
         if content.get("instructions"):
             _docx_rtl(d.add_paragraph(content["instructions"]), 12)
+        if kind == "worksheet":
+            if content.get("objectives"):
+                _docx_rtl(d.add_paragraph("الأهداف"), 16, True, sty["accent"])
+                for o in content["objectives"]:
+                    _docx_rtl(d.add_paragraph("• " + o), 12)
+            if content.get("activities"):
+                _docx_rtl(d.add_paragraph("الأنشطة"), 16, True, sty["accent"])
+                for a in content["activities"]:
+                    _docx_rtl(d.add_paragraph(a.get("title", "نشاط")), 14, True, NAVY)
+                    for ln in str(a.get("body", "")).split("\n"):
+                        _docx_rtl(d.add_paragraph(ln), 12)
+            _docx_rtl(d.add_paragraph("الأسئلة"), 16, True, sty["accent"])
         for i, q in enumerate(content["questions"], 1):
-            _docx_rtl(d.add_paragraph(f"{i}. {q['text']}  ({q.get('points', 1)})"), 13, True)
-            for j, o in enumerate(q.get("options", [])):
-                _docx_rtl(d.add_paragraph(f"{'أبجد'[j] if j < 4 else j+1}) {o}"), 12)
-            if kind == "worksheet" or q["type"] in ("short", "essay", "fill"):
-                _docx_rtl(d.add_paragraph("الإجابة: " + "_" * 45), 12, color="8A97A6")
+            _docx_question(d, i, q, kind)
         if kind == "assessment":
             d.add_page_break()
             _docx_rtl(d.add_paragraph("نموذج الإجابة"), 16, True, TEAL)
             for i, q in enumerate(content["questions"], 1):
-                _docx_rtl(d.add_paragraph(f"{i}. {q.get('answer') or '(لا توجد إجابة)'}"), 12)
+                _docx_rtl(d.add_paragraph(f"{i}. {_q_answer(q) or '(لا توجد إجابة)'}"), 12)
+            rub = content.get("rubric") or []
+            if rub:
+                _docx_rtl(d.add_paragraph("سلم التقييم (Rubric)"), 16, True, TEAL)
+                for r in rub:
+                    _docx_rtl(d.add_paragraph(f"• {r['criterion']} — {float(r.get('weight', 0) or 0):g}%"), 13, True)
+                    det = " | ".join(x for x in [f"ممتاز: {r.get('excellent', '')}" if r.get("excellent") else "",
+                                                 f"جيد: {r.get('good', '')}" if r.get("good") else "",
+                                                 f"يحتاج دعمًا: {r.get('poor', '')}" if r.get("poor") else ""] if x)
+                    if det:
+                        _docx_rtl(d.add_paragraph(det), 12, color="444444")
     b = io.BytesIO()
     d.save(b)
     return b.getvalue()
@@ -311,8 +410,14 @@ def rows_for(kind, content):
         return ["رقم", "العنوان", "النقاط", "الملاحظات"], [[i + 1, s["title"], "\n".join(s["bullets"]), s.get("notes", "")] for i, s in enumerate(content["slides"])]
     if kind == "document":
         return ["القسم", "المحتوى"], [[s["heading"], s["body"]] for s in content["sections"]]
-    return ["رقم", "النوع", "السؤال", "الخيارات", "الإجابة", "الدرجة", "المهارة", "الصعوبة"], [
-        [i + 1, q["type"], q["text"], " | ".join(q.get("options", [])), q.get("answer", ""), q.get("points", 1), q.get("skill", ""), q.get("difficulty", "")]
+    def cell_opts(q):
+        if q.get("type") == "matching":
+            return " | ".join(f"{a} ⇐ {b}" for a, b in q.get("pairs", []))
+        if q.get("type") == "ordering":
+            return " ← ".join(q.get("items", []))
+        return " | ".join(q.get("options", []))
+    return ["رقم", "النوع", "السؤال", "الخيارات/البنود", "الإجابة", "الدرجة", "المهارة", "الصعوبة"], [
+        [i + 1, q["type"], q["text"], cell_opts(q), _q_answer(q), q.get("points", 1), q.get("skill", ""), q.get("difficulty", "")]
         for i, q in enumerate(content["questions"])]
 
 
@@ -355,10 +460,34 @@ def html_bytes(kind, content):
         for s in content["sections"]:
             parts.append(f"<h2>{e(s['heading'])}</h2><p>{e(s['body']).replace(chr(10), '<br>')}</p>")
     else:
-        parts.append(f"<p>{e(content.get('instructions',''))}</p><ol>")
+        parts.append(f"<p>{e(content.get('instructions',''))}</p>")
+        if kind == "worksheet":
+            if content.get("objectives"):
+                parts.append("<h2>الأهداف</h2><ul>" + "".join(f"<li>{e(o)}</li>" for o in content["objectives"]) + "</ul>")
+            for a in content.get("activities", []):
+                parts.append(f"<h3>{e(a.get('title','نشاط'))}</h3><p>{e(str(a.get('body',''))).replace(chr(10), '<br>')}</p>")
+        parts.append("<ol>")
         for q in content["questions"]:
-            parts.append(f"<li><b>{e(q['text'])}</b>" + ("<ul>" + "".join(f"<li>{e(o)}</li>" for o in q.get("options", [])) + "</ul>" if q.get("options") else "") + "</li>")
+            li = f"<li><b>{e(q['text'])}</b>"
+            if q.get("type") == "matching" and q.get("pairs"):
+                rights = _shuffled([b for _, b in q["pairs"]], q["text"])
+                li += "<ol type='a'>" + "".join(f"<li>{e(a)}</li>" for a, _ in q["pairs"]) + "</ol>"
+                li += "<p>الاختيارات: " + e(" ، ".join(f"{_aletter(k)}) {r}" for k, r in enumerate(rights))) + "</p>"
+            elif q.get("type") == "ordering" and q.get("items"):
+                li += "<ul>" + "".join(f"<li>( ) {e(it)}</li>" for it in _shuffled(q["items"], q["text"])) + "</ul>"
+            elif q.get("options"):
+                li += "<ul>" + "".join(f"<li>{e(o)}</li>" for o in q["options"]) + "</ul>"
+            parts.append(li + "</li>")
         parts.append("</ol>")
+        if kind == "assessment":
+            parts.append("<h2>نموذج الإجابة</h2><ol>" + "".join(
+                f"<li>{e(_q_answer(q) or '(لا توجد إجابة)')}</li>" for q in content["questions"]) + "</ol>")
+            rub = content.get("rubric") or []
+            if rub:
+                rows = "".join(f"<tr><td>{e(r['criterion'])}</td><td>{float(r.get('weight',0) or 0):g}%</td>"
+                               f"<td>{e(r.get('excellent',''))}</td><td>{e(r.get('good',''))}</td><td>{e(r.get('poor',''))}</td></tr>" for r in rub)
+                parts.append("<h2>سلم التقييم</h2><table border='1' cellspacing='0' cellpadding='6'>"
+                             "<tr><th>المعيار</th><th>الوزن</th><th>ممتاز</th><th>جيد</th><th>يحتاج دعمًا</th></tr>" + rows + "</table>")
     doc = (f"<!doctype html><html lang='ar' dir='rtl'><meta charset='utf-8'><title>{e(content.get('title',''))}</title>"
            f"<style>body{{font-family:Arial,sans-serif;max-width:800px;margin:2rem auto;color:#{NAVY};line-height:1.8}}h1,h2{{color:#{TEAL}}}</style><body>" + "".join(parts) + "</body></html>")
     return doc.encode("utf-8")
