@@ -2,6 +2,29 @@ import streamlit as st
 
 st.set_page_config(page_title="استوديو الإنتاج التعليمي الذكي | EduFlow AI Studio", page_icon="🎓", layout="wide", initial_sidebar_state="auto")
 
+# Hot-reload edited app modules so a redeploy takes effect without a restart (a restart wipes the temporary database).
+import importlib, os, sys
+_HOT = ["core.templates", "core.gen", "core.quality", "core.export", "core.svc", "ui", "v_work", "v_misc", "v_wizard"]
+_seen = sys.__dict__.setdefault("_ef_mtimes", {})
+_changed = False
+for _n in _HOT:
+    try:
+        _m = importlib.import_module(_n)
+        _mt = os.path.getmtime(_m.__file__)
+        if _seen.get(_n) != _mt:
+            if _n in _seen or _changed is False:
+                pass
+            _seen[_n] = _mt
+            _changed = True
+    except Exception:
+        pass
+if _changed:
+    for _n in _HOT:
+        try:
+            importlib.reload(sys.modules[_n])
+        except Exception:
+            pass
+
 from core import db, auth, svc, gen, ai
 from ui import *
 import v_wizard, v_work, v_misc
