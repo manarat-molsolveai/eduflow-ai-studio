@@ -61,7 +61,7 @@ def settings(uid):
         if not k: st.error("أدخل مفتاحًا أولًا")
         else:
             ai.set_setting(uid, "provider", prov); ai.set_setting(uid, "model", model)
-            with st.spinner("اختبار حقيقي للاتصال..."):
+            with st.spinner("جاري المحاولة... اختبار حقيقي للاتصال، وقد يستغرق بضع دقائق مع شبكة بطيئة (إعادة محاولة تلقائية بمهلة أطول)"):
                 ok, msg = ai.test_connection(uid, prov, model, k)
             (st.success if ok else st.error)(msg)
             db.log(uid, "ai_test", f"{prov} {'ok' if ok else 'fail'}")

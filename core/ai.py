@@ -113,9 +113,18 @@ def _err_detail(r):
 
 
 def gemini_models(key, timeout=30):
-    """Models this key can really call with generateContent (live ListModels)."""
-    r = requests.get("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", timeout=timeout,
-                     headers={"x-goog-api-key": key})
+    """Models this key can really call with generateContent (live ListModels).
+    Slow networks: a timeout/connection error retries once with a longer wait."""
+    r = None
+    for tmo in (timeout, max(90, timeout)):
+        try:
+            r = requests.get("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", timeout=tmo,
+                             headers={"x-goog-api-key": key})
+            break
+        except (requests.Timeout, requests.ConnectionError):
+            continue
+    if r is None:
+        raise RuntimeError("تعذر الوصول إلى خوادم Google (مهلة أو انقطاع في الشبكة) رغم إعادة المحاولة بمهلة أطول")
     if r.status_code >= 400:
         raise RuntimeError(_err_detail(r))
     out = []
@@ -174,13 +183,25 @@ def _call(provider, model, key, system, prompt, max_tokens=4000, timeout=90):
         return "".join(b.get("text", "") for b in j["content"]), j.get("usage", {}).get("input_tokens", 0), j.get("usage", {}).get("output_tokens", 0)
     if provider == "gemini":
         order = [model] + [m for m in PROVIDERS["gemini"]["models"] if m != model]
-        last = None
+        last, net_errs = None, []
         for m in order:
-            r = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent",
-                              timeout=timeout, headers={"x-goog-api-key": key},
-                              json={"systemInstruction": {"parts": [{"text": system}]},
-                                    "contents": [{"parts": [{"text": prompt}]}],
-                                    "generationConfig": {"maxOutputTokens": max_tokens}})
+            r = None
+            # Slow networks: retry each model once with a longer wait before moving on.
+            for tmo in (timeout, min(120, max(90, timeout))):
+                try:
+                    r = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent",
+                                      timeout=tmo, headers={"x-goog-api-key": key},
+                                      json={"systemInstruction": {"parts": [{"text": system}]},
+                                            "contents": [{"parts": [{"text": prompt}]}],
+                                            "generationConfig": {"maxOutputTokens": max_tokens}})
+                    break
+                except (requests.Timeout, requests.ConnectionError) as e:
+                    net_errs.append(f"{type(e).__name__}@{m}")
+                    continue
+            if r is None:
+                if last is None:
+                    break  # no HTTP response at all: network unreachable, more models would just waste minutes
+                continue
             if r.status_code in (429, 500, 503, 404):
                 last = r
                 continue
@@ -189,7 +210,9 @@ def _call(provider, model, key, system, prompt, max_tokens=4000, timeout=90):
             u = j.get("usageMetadata", {})
             _call.last_model = m
             return j["candidates"][0]["content"]["parts"][0]["text"], u.get("promptTokenCount", 0), u.get("candidatesTokenCount", 0)
-        last.raise_for_status()
+        if last is not None:
+            last.raise_for_status()
+        raise RuntimeError("تعذر الوصول إلى خوادم Google (مهلة أو انقطاع في الشبكة) رغم إعادة المحاولة بمهلة أطول وتجربة نماذج أخرى")
     raise ValueError("unknown provider")
 
 
@@ -217,6 +240,9 @@ def test_connection(uid, provider, model, key):
         set_setting(uid, f"tested_{provider}", "fail")
         det = _err_detail(e.response) if e.response is not None else "?"
         return False, f"فشل الاتصال ({det}). تحقق من المفتاح والنموذج"
+    except RuntimeError as e:
+        set_setting(uid, f"tested_{provider}", "fail")
+        return False, f"فشل الاتصال: {str(e)[:300]}"
     except Exception as e:
         set_setting(uid, f"tested_{provider}", "fail")
         return False, f"فشل الاتصال: {type(e).__name__} {str(e)[:300]}"
