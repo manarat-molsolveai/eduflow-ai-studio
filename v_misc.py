@@ -162,7 +162,7 @@ def analytics(uid):
         st.bar_chart({("قواعد محلية" if g == "local-rules" else g): n for g, n in a["generators"].items()}, color="#7C5CFC")
     with r:
         st.subheader("حالة المخرجات")
-        st.bar_chart(a["status"], color="#16A6A1")
+        st.bar_chart({{"needs_review": "يحتاج مراجعة", "approved": "معتمد", "failed": "فشل", "processing": "قيد المعالجة"}.get(k, k): n for k, n in a["status"].items()}, color="#16A6A1")
         st.subheader("الصيغ المصدّرة")
         if a["exports"]: st.bar_chart({k.upper(): n for k, n in a["exports"].items()}, color="#F5A524")
         else: st.caption("لا ملفات مصدّرة بعد.")

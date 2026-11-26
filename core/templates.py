@@ -8,11 +8,11 @@ TEMPLATES = {
     "quick_review": {"label": "مراجعة سريعة", "desc": "عرض قصير (5 شرائح) + اختبار.",
                      "ptype": "lesson", "difficulty": "سهل", "n_slides": 5,
                      "plan": [{"kind": "presentation", "n": 5}, {"kind": "assessment", "n": 8}],
-                     "objectives": ["أن يستعيد الطالب أهم أفكار {t}", "أن يقيّم الطالب فهمه لـ {t}"]},
+                     "objectives": ["أن يستعيد الطالب أهم أفكار موضوع {t}", "أن يقيّم الطالب فهمه لموضوع {t}"]},
     "practice": {"label": "تدريب وتقويم", "desc": "ورقة عمل + اختبار بمستوى صعب.",
                  "ptype": "lesson", "difficulty": "صعب", "n_slides": 8,
                  "plan": [{"kind": "worksheet", "n": 8}, {"kind": "assessment", "n": 8}],
-                 "objectives": ["أن يحلل الطالب مسائل {t}", "أن يقيّم الطالب حلولًا مختلفة لـ {t}"]},
+                 "objectives": ["أن يحلل الطالب مسائل موضوع {t}", "أن يقيّم الطالب حلولًا مختلفة لموضوع {t}"]},
 }
 
 
